@@ -1,16 +1,18 @@
 package main
 
 import (
+    "context"
     "fmt"
     "os"
     "time"
 
-    "github.com/cakturk/go-netstat/netstat"
-    "gitlab.w6d.io/w6d/library/log"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     k8s "k8s.io/client-go/kubernetes"
+
+    "github.com/cakturk/go-netstat/netstat"
     "k8s.io/client-go/rest"
     "k8s.io/client-go/tools/clientcmd"
+    "k8s.io/klog/v2/klogr"
 )
 
 const (
@@ -20,18 +22,15 @@ const (
 
 var (
     namespace string
-    svcname   string
+    svcName   string
+    log       = klogr.New()
 )
-
-func init() {
-    log.SetLevel(log.TRACE)
-}
 
 func main() {
     if len(os.Args) != 2 {
         usage()
     }
-    svcname = os.Args[1]
+    svcName = os.Args[1]
     var proto uint
     proto |= protoIPv4
     proto |= protoIPv6
@@ -60,10 +59,13 @@ func main() {
         time.Sleep(10 * time.Second)
     }
     if port != 0 {
-        setsvc(svcname, port)
+        if err := setsvc(svcName, port); err != nil {
+            log.Error(err, "set kubernetes service")
+            os.Exit(1)
+        }
         os.Exit(0)
     }
-    log.Fatal("Port not found")
+    log.Error(fmt.Errorf("setsvc"), "Port not found")
 }
 
 func usage() {
@@ -72,15 +74,15 @@ func usage() {
     os.Exit(1)
 }
 
-func displaySockInfo(proto string, s []netstat.SockTabEntry) uint16 {
-    lookup := func(skaddr *netstat.SockAddr) uint16 {
-        const IPv4Strlen = 17
-        addr := skaddr.IP.String()
+func displaySockInfo(_ string, s []netstat.SockTabEntry) uint16 {
+    lookup := func(skAddr *netstat.SockAddr) uint16 {
+        const IPv4StrLen = 17
+        addr := skAddr.IP.String()
 
-        if len(addr) > IPv4Strlen {
-            addr = addr[:IPv4Strlen]
+        if len(addr) > IPv4StrLen {
+            addr = addr[:IPv4StrLen]
         }
-        return skaddr.Port
+        return skAddr.Port
     }
     for _, e := range s {
         return lookup(e.LocalAddr)
@@ -91,11 +93,13 @@ func displaySockInfo(proto string, s []netstat.SockTabEntry) uint16 {
 func newClient() (k8s.Interface, error) {
     config, err := getConfig()
     if err != nil {
-        log.Fatal("failed to get k8s config")
+        log.Error(err, "failed to get k8s config")
+        return nil, err
     }
     k8scs, err := k8s.NewForConfig(config)
     if err != nil {
-        log.Fatal("failed to create k8s client from config")
+        log.Error(err, "failed to create k8s client from config")
+        return nil, err
     }
     return k8scs, nil
 }
@@ -106,45 +110,46 @@ func getConfig() (config *rest.Config, err error) {
     kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
     namespace, _, err = kubeConfig.Namespace()
     if err != nil {
-        log.Fatal("Couldn't get kubeConfiguration namespace")
+        log.Error(err, "Couldn't get kubeConfiguration namespace")
     }
     config, err = kubeConfig.ClientConfig()
     if err != nil {
-        log.Fatal("Parsing kubeconfig failed")
+        log.Error(err, "Parsing kubeconfig failed")
     }
     return config, nil
 }
 
-func setsvc(svcname string, port uint16) (err error) {
-
+func setsvc(svcName string, port uint16) (err error) {
+    ctx := context.Background()
     client, err := newClient()
     if err != nil {
-        log.Fatalf("new client return %v", err)
+        log.Error(err, "new client return %v")
     }
     retry := 5
     for {
-        svc, err := client.CoreV1().Services(namespace).Get(svcname, metav1.GetOptions{})
+        svc, err := client.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
         if err != nil {
-            log.Fatalf("get svc return %v", err)
+            log.Error(err, "get svc return")
         }
-        log.Tracef("target contains %v", svc.Spec.Ports[0].TargetPort.IntVal)
+
+        log.V(2).Info(fmt.Sprintf("target contains %v", svc.Spec.Ports[0].TargetPort.IntVal))
         svc.Spec.Ports[0].TargetPort.StrVal = ""
         svc.Spec.Ports[0].TargetPort.IntVal = int32(port)
-        log.Tracef("target set by %v", svc.Spec.Ports[0].TargetPort.IntVal)
-        _, err = client.CoreV1().Services(namespace).Update(svc)
+        log.V(2).Info(fmt.Sprintf("target set by %v", svc.Spec.Ports[0].TargetPort.IntVal))
+        _, err = client.CoreV1().Services(namespace).Update(ctx, svc, metav1.UpdateOptions{})
         if err != nil {
-            log.Fatalf("update svc return %v", err)
+            log.Error(err, "update svc return")
         }
-        rsp, _ := client.CoreV1().Services(namespace).Get(svcname, metav1.GetOptions{})
+        rsp, _ := client.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
         if rsp.Spec.Ports[0].TargetPort.IntVal == svc.Spec.Ports[0].TargetPort.IntVal {
             log.Info("port has been set")
             break
         }
         if retry <= 0 {
-            log.Fatal("port update failed")
+            log.Error(err, "port update failed")
         }
-        log.Warning("port has not been set")
-        log.Debug("retrying...")
+        log.Info("port has not been set")
+        log.V(1).Info("retrying...")
         time.Sleep(2 * time.Second)
         retry--
     }

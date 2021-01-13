@@ -1,9 +1,0 @@
-{
-  "name": "library-log",
-  "author": "Lucien TERRAILLON",
-  "license": "proprietary",
-  "source": "https://gitlab.w6d.io/w6d/library/log",
-  "summary": "logging package",
-  "dependencies": [],
-  "version": "1.2.26"
-}
