@@ -35,13 +35,14 @@ func main() {
     proto |= protoIPv4
     proto |= protoIPv6
     var fn netstat.AcceptFn
-    fn = func(*netstat.SockTabEntry) bool { return true }
+    fn = func(s *netstat.SockTabEntry) bool { return s.State == netstat.Listen }
 
     var (
     	port uint16
     	retry = 60
     	)
     for {
+        time.Sleep(10 * time.Second)
 		tabs, err := netstat.TCPSocks(fn)
         if err == nil {
             port = displaySockInfo("tcp", tabs)
@@ -56,7 +57,6 @@ func main() {
 			break
         }
 		retry--
-        time.Sleep(10 * time.Second)
     }
     if port != 0 {
         if err := setsvc(svcName, port); err != nil {
