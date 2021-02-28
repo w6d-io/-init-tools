@@ -1,4 +1,7 @@
-#!/bin/bash -x
+#!/usr/bin/env bash
+
+set -x
+set -e
 
 BINDIR=$(pwd)/bin
 mkdir -p $BINDIR
