@@ -11,8 +11,7 @@ ENV GO111MODULE="on" \
     CGO_ENABLED=0 \
     GOOS=linux \
     GOARCH=amd64
-WORKDIR /build/${PROJECT_PATH}
-RUN mkdir -p /build/bin
+WORKDIR /workspace
 COPY . .
 RUN ./build.sh
 
@@ -34,4 +33,4 @@ LABEL maintainer="${USER_NAME} <${USER_EMAIL}>" \
 
 
 WORKDIR /opt/bin
-COPY --from=builder /build/bin /opt/bin
+COPY --from=builder /workspace/bin /opt/bin
